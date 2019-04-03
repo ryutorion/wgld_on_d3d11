@@ -125,14 +125,21 @@ b8 D3D11Renderer::Update(float delta)
 		++tick;
 	}
 
-	float rad = (tick % 360) * F_PI / 180.0f;
+	const f32 rad = (tick % 360) * F_PI / 180.0f;
+	const f32 tx = cos(rad) * 3.5f;
+	const f32 ty = sin(rad) * 3.5f;
+	const f32 tz = sin(rad) * 3.5f;
 
 	XMVECTOR d;
-	CBModelVS worlds_vs[1] {};
-	CBModelPS worlds_ps[1] {};
-	worlds_vs[0].W = XMMatrixRotationAxis(XMVectorSet(0.0f, 1.0f, 1.0f, 1.0f), rad);
+	CBModelVS worlds_vs[2] {};
+	CBModelPS worlds_ps[2] {};
+	worlds_vs[0].W = XMMatrixRotationAxis(XMVectorSet(0.0f, 1.0f, 1.0f, 1.0f), -rad) * XMMatrixTranslation(tx, -ty, -tz);
 	worlds_ps[0].IW = XMMatrixTranspose(XMMatrixInverse(&d, worlds_vs[0].W));
 	worlds_vs[0].W = XMMatrixTranspose(worlds_vs[0].W);
+
+	worlds_vs[1].W = XMMatrixTranslation(-tx, ty, tz);
+	worlds_ps[1].IW = XMMatrixTranspose(XMMatrixInverse(&d, worlds_vs[1].W));
+	worlds_vs[1].W = XMMatrixTranspose(worlds_vs[1].W);
 
 	for(auto i = 0; i < size(worlds_vs); ++i)
 	{
@@ -179,7 +186,11 @@ b8 D3D11Renderer::Render()
 	{
 		mpImmediateContext->VSSetConstantBuffers(1, 1, mpVSCBModels[i].GetAddressOf());
 		mpImmediateContext->PSSetConstantBuffers(1, 1, mpPSCBModels[i].GetAddressOf());
-		mpImmediateContext->DrawIndexed(mIndexCount, 0, 0);
+		mpImmediateContext->DrawIndexed(
+			mIndexCounts[i],
+			mStartIndexLocations[i],
+			mBaseVertexLocations[i]
+		);
 	}
 
 	mpSwapChain->Present(0, 0);
@@ -393,8 +404,8 @@ static void GenerateTorus(
 }
 
 static void GenerateSphere(
-	const s32 row,
-	const s32 column,
+	const s32 row, 
+	const s32 column, 
 	const f32 rad,
 	const XMVECTOR * p_color,
 	vector<Vertex> & vertices,
@@ -406,13 +417,60 @@ static void GenerateSphere(
 		f32 r = F_PI * i / row;
 		f32 ry = cos(r);
 		f32 rr = sin(r);
+
+		for(auto ii = 0; ii <= column; ++ii)
+		{
+			f32 tr = F_PI * 2.0f * ii / column;
+			f32 tx = rr * rad * cos(tr);
+			f32 ty = ry * rad;
+			f32 tz = rr * rad * sin(tr);
+			f32 rx = rr * cos(tr);
+			f32 rz = rr * sin(tr);
+
+			Vertex v;
+			v.position = XMVectorSet(tx, ty, tz, 1.0f);
+			v.normal = XMVectorSet(rx, ry, rz, 0.0f);
+			if(p_color)
+			{
+				v.color = *p_color;
+			}
+			else
+			{
+				hsva_to_rgba(360.0f * i / row, 1.0f, 1.0f, 1.0f, v.color);
+			}
+
+			vertices.emplace_back(v);
+		}
+	}
+
+	for(auto i = 0; i < row; ++i)
+	{
+		for(auto ii = 0; ii < column; ++ii)
+		{
+			u32 r = (column + 1) * i + ii;
+			indices.emplace_back(r);
+			indices.emplace_back(r + 1);
+			indices.emplace_back(r + column + 2);
+			indices.emplace_back(r);
+			indices.emplace_back(r + column + 2);
+			indices.emplace_back(r + column + 1);
+		}
 	}
 }
 
 b8 D3D11Renderer::GenerateMesh()
 {
+	mStartIndexLocations[0] = 0;
+	mBaseVertexLocations[0] = 0;
 	XMVECTOR torus_color = XMVectorSet(0.75f, 0.25f, 0.25f, 1.0f);
 	GenerateTorus(64, 64, 0.5f, 1.5f, &torus_color, mVertices, mIndices);
+	mIndexCounts[0] = static_cast<u32>(mIndices.size());
+
+	mStartIndexLocations[1] = static_cast<u32>(mIndices.size());
+	mBaseVertexLocations[1] = static_cast<u32>(mVertices.size());
+	XMVECTOR sphere_color = XMVectorSet(0.25f, 0.25f, 0.75f, 1.0f);
+	GenerateSphere(64, 64, 2.0f, &sphere_color, mVertices, mIndices);
+	mIndexCounts[1] = static_cast<u32>(mIndices.size()) - mIndexCounts[0];
 
 	return true;
 }
@@ -481,8 +539,6 @@ b8 D3D11Renderer::CreateIndexBuffer()
 	{
 		return false;
 	}
-
-	mIndexCount = static_cast<u32>(mIndices.size());
 
 	return true;
 }
@@ -620,7 +676,8 @@ b8 D3D11Renderer::CreateVSConstantBuffers()
 
 	CBModelVS cbModels[]
 	{
-		{ XMMatrixIdentity() }
+		{ XMMatrixIdentity() },
+		{ XMMatrixIdentity() },
 	};
 
 	for(auto i = 0; i < size(cbModels); ++i)
@@ -695,7 +752,7 @@ b8 D3D11Renderer::CreatePixelShader()
 b8 D3D11Renderer::CreatePSConstantBuffers()
 {
 	CBLight cbLight {
-		mLightDir,
+		mLightPos,
 		XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f),
 		mEye
 	};
@@ -721,7 +778,8 @@ b8 D3D11Renderer::CreatePSConstantBuffers()
 
 	CBModelPS cbModels[]
 	{
-		{ XMMatrixIdentity() }
+		{ XMMatrixIdentity() },
+		{ XMMatrixIdentity() },
 	};
 
 	for(auto i = 0; i < size(cbModels); ++i)
@@ -744,7 +802,6 @@ b8 D3D11Renderer::CreatePSConstantBuffers()
 		}
 	}
 
-	return true;
 	return true;
 }
 

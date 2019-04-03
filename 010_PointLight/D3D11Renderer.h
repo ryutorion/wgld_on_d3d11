@@ -102,6 +102,8 @@ private:
 
 	std::vector<Vertex> mVertices;
 	std::vector<u32> mIndices;
+	u32 mStartIndexLocations[2];
+	u32 mBaseVertexLocations[2];
 
 	//! 頂点バッファへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11Buffer> mpVertexBuffer;
@@ -112,7 +114,7 @@ private:
 	//! インデックスバッファへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11Buffer> mpIndexBuffer;
 	DXGI_FORMAT mIndexFormat = DXGI_FORMAT_R32_UINT;
-	u32 mIndexCount = 0;
+	u32 mIndexCounts[2];
 
 	//! 頂点シェーダのバイナリ
 	Microsoft::WRL::ComPtr<ID3DBlob> mpVertexShaderBlob;
@@ -131,7 +133,7 @@ private:
 	{
 		DirectX::XMMATRIX W;
 	};
-	Microsoft::WRL::ComPtr<ID3D11Buffer> mpVSCBModels[1];
+	Microsoft::WRL::ComPtr<ID3D11Buffer> mpVSCBModels[2];
 
 	//! ラスタライザーステートへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11RasterizerState2> mpRasterizerState;
@@ -141,7 +143,7 @@ private:
 
 	struct CBLight
 	{
-		DirectX::XMVECTOR light_dir;
+		DirectX::XMVECTOR light_pos;
 		DirectX::XMVECTOR ambient_color;
 		DirectX::XMVECTOR eye_dir;
 	};
@@ -152,7 +154,7 @@ private:
 	{
 		DirectX::XMMATRIX IW;
 	};
-	Microsoft::WRL::ComPtr<ID3D11Buffer> mpPSCBModels[1];
+	Microsoft::WRL::ComPtr<ID3D11Buffer> mpPSCBModels[2];
 
 	//! レンダーターゲットビューへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView1> mpRTV;
@@ -169,7 +171,7 @@ private:
 	DirectX::XMVECTOR mAt = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
 	DirectX::XMVECTOR mUp = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 1.0f);
 
-	DirectX::XMVECTOR mLightDir = DirectX::XMVectorSet(-0.5f, 0.5f, 0.5f, 0.0f);
+	DirectX::XMVECTOR mLightPos = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
 };
 
 #endif // D3D11_RENDERER_H_INCLUDED

@@ -727,7 +727,6 @@ b8 D3D11Renderer::CreatePSConstantBuffers()
 	}
 
 	return true;
-	return true;
 }
 
 b8 D3D11Renderer::CreateRenderTargetView()
