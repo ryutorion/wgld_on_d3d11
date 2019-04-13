@@ -13,6 +13,14 @@ static inline constexpr float deg_to_rad(float degree)
 
 D3D11Renderer::D3D11Renderer()
 {
+	CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+	CoCreateInstance(
+		CLSID_WICImagingFactory2,
+		nullptr,
+		CLSCTX_INPROC_SERVER,
+		IID_PPV_ARGS(&mpImagingFactory)
+	);
 }
 
 D3D11Renderer::~D3D11Renderer()
@@ -21,6 +29,10 @@ D3D11Renderer::~D3D11Renderer()
 	{
 		mpImmediateContext->ClearState();
 	}
+
+	mpImagingFactory.Reset();
+
+	CoUninitialize();
 }
 
 b8 D3D11Renderer::Initialize(int32_t width, int32_t height, HWND hWnd)
@@ -88,6 +100,26 @@ b8 D3D11Renderer::Initialize(int32_t width, int32_t height, HWND hWnd)
 		return false;
 	}
 
+	if(!CreatePSConstantBuffers())
+	{
+		return false;
+	}
+
+	if(!LoadTexture(L"texture01.png", mpTextures[0], mpShaderResourceViews[0]))
+	{
+		return false;
+	}
+
+	if(!LoadTexture(L"texture02.png", mpTextures[1], mpShaderResourceViews[1]))
+	{
+		return false;
+	}
+
+	if(!CreateSamplerState())
+	{
+		return false;
+	}
+
 	if(!CreateRenderTargetView())
 	{
 		return false;
@@ -119,14 +151,16 @@ b8 D3D11Renderer::Update(float delta)
 		++tick;
 	}
 
-	float rad = (tick % 360) * F_PI / 180.0f;
+	const f32 rad = (tick % 360) * F_PI / 180.0f;
 
-	XMMATRIX worlds[1]
-	{
-		XMMatrixRotationAxis(XMVectorSet(0.0f, 1.0f, 1.0f, 1.0f), rad),
-	};
+	XMVECTOR d;
+	CBModelVS worlds_vs[1] {};
+	CBModelPS worlds_ps[1] {};
+	worlds_vs[0].W = XMMatrixRotationAxis(XMVectorSet(0.0f, 1.0f, 0.0f, 1.0f), rad);
+	worlds_ps[0].IW = XMMatrixTranspose(XMMatrixInverse(&d, worlds_vs[0].W));
+	worlds_vs[0].W = XMMatrixTranspose(worlds_vs[0].W);
 
-	for(auto i = 0; i < size(worlds); ++i)
+	for(auto i = 0; i < size(worlds_vs); ++i)
 	{
 		D3D11_MAPPED_SUBRESOURCE mapped_subresource;
 		HRESULT hr = mpImmediateContext->Map(mpVSCBModels[i].Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
@@ -135,9 +169,23 @@ b8 D3D11Renderer::Update(float delta)
 			return false;
 		}
 
-		memcpy(mapped_subresource.pData, &worlds[i], sizeof(worlds[i]));
+		memcpy(mapped_subresource.pData, &worlds_vs[i], sizeof(worlds_vs[i]));
 
 		mpImmediateContext->Unmap(mpVSCBModels[i].Get(), 0);
+	}
+
+	for(auto i = 0; i < size(worlds_ps); ++i)
+	{
+		D3D11_MAPPED_SUBRESOURCE mapped_subresource;
+		HRESULT hr = mpImmediateContext->Map(mpPSCBModels[i].Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
+		if(FAILED(hr))
+		{
+			return false;
+		}
+
+		memcpy(mapped_subresource.pData, &worlds_ps[i], sizeof(worlds_ps[i]));
+
+		mpImmediateContext->Unmap(mpPSCBModels[i].Get(), 0);
 	}
 
 	return true;
@@ -156,7 +204,12 @@ b8 D3D11Renderer::Render()
 	for(auto i = 0; i < size(mpVSCBModels); ++i)
 	{
 		mpImmediateContext->VSSetConstantBuffers(1, 1, mpVSCBModels[i].GetAddressOf());
-		mpImmediateContext->DrawIndexed(mIndexCount, 0, 0);
+		mpImmediateContext->PSSetConstantBuffers(1, 1, mpPSCBModels[i].GetAddressOf());
+		mpImmediateContext->DrawIndexed(
+			mIndexCounts[i],
+			mStartIndexLocations[i],
+			mBaseVertexLocations[i]
+		);
 	}
 
 	mpSwapChain->Present(0, 0);
@@ -314,13 +367,16 @@ static void hsva_to_rgba(f32 h, f32 s, f32 v, f32 a, XMVECTOR & c)
 	}
 }
 
-b8 D3D11Renderer::GenerateMesh()
+static void GenerateTorus(
+	const s32 row,
+	const s32 column,
+	const f32 irad,
+	const f32 orad, 
+	const XMVECTOR * p_color,
+	vector<Vertex> & vertices,
+	vector<u32> & indices
+)
 {
-	const s32 row = 32;
-	const s32 column = 32;
-	const f32 irad = 1.0f;
-	const f32 orad = 2.0f;
-
 	for(s32 i = 0; i <= row; ++i)
 	{
 		f32 r = F_PI * 2.0f / row * i;
@@ -333,11 +389,21 @@ b8 D3D11Renderer::GenerateMesh()
 			f32 tx = (rr * irad + orad) * cos(tr);
 			f32 ty = ry * irad;
 			f32 tz = (rr * irad + orad) * sin(tr);
+			f32 rx = rr * cos(tr);
+			f32 rz = rr * sin(tr);
 
 			Vertex v;
 			v.position = XMVectorSet(tx, ty, tz, 1.0f);
-			hsva_to_rgba(360.0f / column * ii, 1.0f, 1.0f, 1.0f, v.color);
-			mVertices.emplace_back(v);
+			v.normal = XMVectorSet(rx, ry, rz, 0.0f);
+			if(p_color)
+			{
+				v.color = *p_color;
+			}
+			else
+			{
+				hsva_to_rgba(360.0f / column * ii, 1.0f, 1.0f, 1.0f, v.color);
+			}
+			vertices.emplace_back(v);
 		}
 	}
 
@@ -346,17 +412,102 @@ b8 D3D11Renderer::GenerateMesh()
 		for(s32 ii = 0; ii < column; ++ii)
 		{
 			s32 r = (column + 1) * i + ii;
-			mIndices.push_back(r);
-			mIndices.push_back(r + column + 1);
-			mIndices.push_back(r + 1);
-			mIndices.push_back(r + column + 1);
-			mIndices.push_back(r + column + 2);
-			mIndices.push_back(r + 1);
+			indices.push_back(r);
+			indices.push_back(r + column + 1);
+			indices.push_back(r + 1);
+			indices.push_back(r + column + 1);
+			indices.push_back(r + column + 2);
+			indices.push_back(r + 1);
+		}
+	}
+}
+
+static void GenerateSphere(
+	const s32 row, 
+	const s32 column, 
+	const f32 rad,
+	const XMVECTOR * p_color,
+	vector<Vertex> & vertices,
+	vector<u32> & indices
+)
+{
+	for(auto i = 0; i <= row; ++i)
+	{
+		f32 r = F_PI * i / row;
+		f32 ry = cos(r);
+		f32 rr = sin(r);
+
+		for(auto ii = 0; ii <= column; ++ii)
+		{
+			f32 tr = F_PI * 2.0f * ii / column;
+			f32 tx = rr * rad * cos(tr);
+			f32 ty = ry * rad;
+			f32 tz = rr * rad * sin(tr);
+			f32 rx = rr * cos(tr);
+			f32 rz = rr * sin(tr);
+
+			Vertex v;
+			v.position = XMVectorSet(tx, ty, tz, 1.0f);
+			v.normal = XMVectorSet(rx, ry, rz, 0.0f);
+			if(p_color)
+			{
+				v.color = *p_color;
+			}
+			else
+			{
+				hsva_to_rgba(360.0f * i / row, 1.0f, 1.0f, 1.0f, v.color);
+			}
+
+			vertices.emplace_back(v);
 		}
 	}
 
+	for(auto i = 0; i < row; ++i)
+	{
+		for(auto ii = 0; ii < column; ++ii)
+		{
+			u32 r = (column + 1) * i + ii;
+			indices.emplace_back(r);
+			indices.emplace_back(r + 1);
+			indices.emplace_back(r + column + 2);
+			indices.emplace_back(r);
+			indices.emplace_back(r + column + 2);
+			indices.emplace_back(r + column + 1);
+		}
+	}
+}
+
+b8 D3D11Renderer::GenerateMesh()
+{
+	mStartIndexLocations[0] = 0;
+	mBaseVertexLocations[0] = 0;
+
+	Vertex vertices[4];
+	vertices[0].position = XMVectorSet(-1.0f,  1.0f, 0.0f, 1.0f);
+	vertices[0].uv = XMFLOAT2(0.0f, 0.0f);
+	vertices[1].position = XMVectorSet( 1.0f,  1.0f, 0.0f, 1.0f);
+	vertices[1].uv = XMFLOAT2(1.0f, 0.0f);
+	vertices[2].position = XMVectorSet(-1.0f, -1.0f, 0.0f, 1.0f);
+	vertices[2].uv = XMFLOAT2(0.0f, 1.0f);
+	vertices[3].position = XMVectorSet( 1.0f, -1.0f, 0.0f, 1.0f);
+	vertices[3].uv = XMFLOAT2(1.0f, 1.0f);
+	for(auto v : vertices)
+	{
+		mVertices.emplace_back(v);
+	}
+
+	mIndices.emplace_back(0);
+	mIndices.emplace_back(1);
+	mIndices.emplace_back(2);
+	mIndices.emplace_back(3);
+	mIndices.emplace_back(2);
+	mIndices.emplace_back(1);
+
+	mIndexCounts[0] = static_cast<u32>(mIndices.size());
+
 	return true;
 }
+
 b8 D3D11Renderer::CreateVertexBuffer()
 {
 	// 頂点バッファの設定
@@ -422,8 +573,6 @@ b8 D3D11Renderer::CreateIndexBuffer()
 		return false;
 	}
 
-	mIndexCount = static_cast<u32>(mIndices.size());
-
 	return true;
 }
 
@@ -467,7 +616,7 @@ b8 D3D11Renderer::LoadShader(
 b8 D3D11Renderer::CreateInputLayout()
 {
 	// インプットレイアウトの要素を設定
-	D3D11_INPUT_ELEMENT_DESC input_element_descs[2]{};
+	D3D11_INPUT_ELEMENT_DESC input_element_descs[4]{};
 	input_element_descs[0].SemanticName = "POSITION";
 	input_element_descs[0].SemanticIndex = 0;
 	input_element_descs[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -476,13 +625,29 @@ b8 D3D11Renderer::CreateInputLayout()
 	input_element_descs[0].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
 	input_element_descs[0].InstanceDataStepRate = 0;
 
-	input_element_descs[1].SemanticName = "COLOR";
+	input_element_descs[1].SemanticName = "NORMAL";
 	input_element_descs[1].SemanticIndex = 0;
 	input_element_descs[1].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
 	input_element_descs[1].InputSlot = 0;
 	input_element_descs[1].AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT;
 	input_element_descs[1].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
 	input_element_descs[1].InstanceDataStepRate = 0;
+
+	input_element_descs[2].SemanticName = "COLOR";
+	input_element_descs[2].SemanticIndex = 0;
+	input_element_descs[2].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	input_element_descs[2].InputSlot = 0;
+	input_element_descs[2].AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT;
+	input_element_descs[2].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+	input_element_descs[2].InstanceDataStepRate = 0;
+
+	input_element_descs[3].SemanticName = "TEXCOORD";
+	input_element_descs[3].SemanticIndex = 0;
+	input_element_descs[3].Format = DXGI_FORMAT_R32G32_FLOAT;
+	input_element_descs[3].InputSlot = 0;
+	input_element_descs[3].AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT;
+	input_element_descs[3].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+	input_element_descs[3].InstanceDataStepRate = 0;
 
 	// インプットレイアウトを生成
 	HRESULT hr = mpDevice->CreateInputLayout(
@@ -527,7 +692,9 @@ b8 D3D11Renderer::CreateVSConstantBuffers()
 		100.0f
 	);
 
-	XMMATRIX cbScene = XMMatrixTranspose(view * projection);
+	CBScene cbScene {
+		XMMatrixTranspose(view * projection),
+	};
 
 	D3D11_BUFFER_DESC buffer_desc {};
 	buffer_desc.ByteWidth = sizeof(cbScene);
@@ -548,9 +715,9 @@ b8 D3D11Renderer::CreateVSConstantBuffers()
 		return false;
 	}
 
-	XMMATRIX cbModels[]
+	CBModelVS cbModels[]
 	{
-		XMMatrixIdentity(),
+		{ XMMatrixIdentity() },
 	};
 
 	for(auto i = 0; i < size(cbModels); ++i)
@@ -563,8 +730,8 @@ b8 D3D11Renderer::CreateVSConstantBuffers()
 		buffer_desc.StructureByteStride = sizeof(cbModels[i]);
 
 		subresource_data.pSysMem = &cbModels[i];
-		subresource_data.SysMemPitch;
-		subresource_data.SysMemSlicePitch;
+		subresource_data.SysMemPitch = 0;
+		subresource_data.SysMemSlicePitch = 0;
 
 		hr = mpDevice->CreateBuffer(&buffer_desc, &subresource_data, &mpVSCBModels[i]);
 		if(FAILED(hr))
@@ -580,7 +747,7 @@ bool D3D11Renderer::CreateRasterizerState()
 {
 	D3D11_RASTERIZER_DESC2 rasterizer_desc {};
 	rasterizer_desc.FillMode = D3D11_FILL_SOLID;
-	rasterizer_desc.CullMode = D3D11_CULL_BACK;
+	rasterizer_desc.CullMode = D3D11_CULL_NONE;
 	rasterizer_desc.FrontCounterClockwise = TRUE;
 	rasterizer_desc.DepthBias = D3D11_DEFAULT_DEPTH_BIAS;
 	rasterizer_desc.DepthBiasClamp = D3D11_DEFAULT_DEPTH_BIAS_CLAMP;
@@ -615,6 +782,225 @@ b8 D3D11Renderer::CreatePixelShader()
 		&mpPixelShader
 	);
 	if(FAILED(hr))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+b8 D3D11Renderer::CreatePSConstantBuffers()
+{
+	CBLight cbLight {
+		mLightPos,
+		XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f),
+		mEye
+	};
+
+	D3D11_BUFFER_DESC buffer_desc {};
+	buffer_desc.ByteWidth = sizeof(cbLight);
+	buffer_desc.Usage = D3D11_USAGE_IMMUTABLE;
+	buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	buffer_desc.CPUAccessFlags = 0;
+	buffer_desc.MiscFlags = 0;
+	buffer_desc.StructureByteStride = sizeof(cbLight);
+
+	D3D11_SUBRESOURCE_DATA subresource_data {};
+	subresource_data.pSysMem = &cbLight;
+	subresource_data.SysMemPitch;
+	subresource_data.SysMemSlicePitch;
+
+	HRESULT hr = mpDevice->CreateBuffer(&buffer_desc, &subresource_data, &mpPSCBLight);
+	if(FAILED(hr))
+	{
+		return false;
+	}
+
+	CBModelPS cbModels[]
+	{
+		{ XMMatrixIdentity() },
+	};
+
+	for(auto i = 0; i < size(cbModels); ++i)
+	{
+		buffer_desc.ByteWidth = sizeof(cbModels[i]);
+		buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+		buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		buffer_desc.MiscFlags = 0;
+		buffer_desc.StructureByteStride = sizeof(cbModels[i]);
+
+		subresource_data.pSysMem = &cbModels[i];
+		subresource_data.SysMemPitch = 0;
+		subresource_data.SysMemSlicePitch = 0;
+
+		hr = mpDevice->CreateBuffer(&buffer_desc, &subresource_data, &mpPSCBModels[i]);
+		if(FAILED(hr))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+b8 D3D11Renderer::LoadTexture(
+	const wchar_t * path_str,
+	Microsoft::WRL::ComPtr<ID3D11Texture2D1>& p_texture,
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView1>& p_shader_resource_view
+)
+{
+	ComPtr<IWICBitmapDecoder> p_bitmap_decoder;
+	HRESULT hr = mpImagingFactory->CreateDecoderFromFilename(
+		path_str,
+		nullptr,
+		GENERIC_READ,
+		WICDecodeMetadataCacheOnDemand,
+		&p_bitmap_decoder
+	);
+	if(FAILED(hr))
+	{
+		return false;
+	}
+
+	ComPtr<IWICBitmapFrameDecode> p_bitmap_source;
+	hr = p_bitmap_decoder->GetFrame(0, &p_bitmap_source);
+	if(FAILED(hr))
+	{
+		return false;
+	}
+
+	D3D11_TEXTURE2D_DESC1 texture2d_desc {};
+	p_bitmap_source->GetSize(&texture2d_desc.Width, &texture2d_desc.Height);
+	texture2d_desc.MipLevels = 1;
+	texture2d_desc.ArraySize = 1;
+
+	WICPixelFormatGUID pixel_format;
+	if(FAILED(p_bitmap_source->GetPixelFormat(&pixel_format)))
+	{
+		return false;
+	}
+
+	u32 stride = 0;
+	if(pixel_format == GUID_WICPixelFormat24bppBGR)
+	{
+		stride = texture2d_desc.Width * 3;
+		texture2d_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	}
+	else if(pixel_format == GUID_WICPixelFormat24bppRGB)
+	{
+		stride = texture2d_desc.Width * 3;
+		texture2d_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	}
+	else
+	{
+		return false;
+	}
+
+	vector<u8> tmp(stride * texture2d_desc.Height);
+	WICRect rect
+	{
+		0,
+		0,
+		static_cast<s32>(texture2d_desc.Width),
+		static_cast<s32>(texture2d_desc.Height)
+	};
+	hr = p_bitmap_source->CopyPixels(&rect, stride, static_cast<u32>(tmp.size()), tmp.data());
+	if(FAILED(hr))
+	{
+		return false;
+	}
+
+	vector<u8> buffer(texture2d_desc.Width * texture2d_desc.Height * 4);
+	switch(texture2d_desc.Format)
+	{
+	case DXGI_FORMAT_B8G8R8A8_UNORM:
+		for(auto r = 0u; r < texture2d_desc.Height; ++r)
+		{
+			auto dst_base = texture2d_desc.Width * 4 * r;
+			auto src_base = texture2d_desc.Width * 3 * r;
+			for(auto c = 0u; c < texture2d_desc.Width; ++c)
+			{
+				buffer[dst_base + c * 4 + 0] = tmp[src_base + c * 3 + 2];
+				buffer[dst_base + c * 4 + 1] = tmp[src_base + c * 3 + 1];
+				buffer[dst_base + c * 4 + 2] = tmp[src_base + c * 3 + 0];
+				buffer[dst_base + c * 4 + 3] = 255;
+			}
+		}
+		break;
+	case DXGI_FORMAT_R8G8B8A8_UNORM:
+		for(auto r = 0u; r < texture2d_desc.Height; ++r)
+		{
+			auto dst_base = texture2d_desc.Width * 4 * r;
+			auto src_base = texture2d_desc.Width * 3 * r;
+			for(auto c = 0u; c < texture2d_desc.Width; ++c)
+			{
+				buffer[dst_base + c * 4 + 0] = tmp[src_base + c * 3 + 0];
+				buffer[dst_base + c * 4 + 1] = tmp[src_base + c * 3 + 1];
+				buffer[dst_base + c * 4 + 2] = tmp[src_base + c * 3 + 2];
+				buffer[dst_base + c * 4 + 3] = 255;
+			}
+		}
+		break;
+	}
+
+	texture2d_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	texture2d_desc.SampleDesc.Count = 1;
+	texture2d_desc.SampleDesc.Quality = 0;
+	texture2d_desc.Usage = D3D11_USAGE_IMMUTABLE;
+	texture2d_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	texture2d_desc.CPUAccessFlags = 0;
+	texture2d_desc.MiscFlags = 0;
+	texture2d_desc.TextureLayout = D3D11_TEXTURE_LAYOUT_UNDEFINED;
+
+	D3D11_SUBRESOURCE_DATA subresource_data {};
+	subresource_data.pSysMem = buffer.data();
+	subresource_data.SysMemPitch = texture2d_desc.Width * 4;
+	subresource_data.SysMemSlicePitch = static_cast<u32>(buffer.size());
+
+	hr = mpDevice->CreateTexture2D1(&texture2d_desc, &subresource_data, &p_texture);
+	if(FAILED(hr))
+	{
+		return false;
+	}
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC1 shader_resource_view_desc {};
+	shader_resource_view_desc.Format = texture2d_desc.Format;
+	shader_resource_view_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	shader_resource_view_desc.Texture2D.MostDetailedMip = 0;
+	shader_resource_view_desc.Texture2D.MipLevels = 1;
+	shader_resource_view_desc.Texture2D.PlaneSlice = 0;
+
+	hr = mpDevice->CreateShaderResourceView1(
+		p_texture.Get(),
+		&shader_resource_view_desc,
+		&p_shader_resource_view
+	);
+	if(FAILED(hr))
+	{
+		return false;
+	}
+	return true;
+}
+
+b8 D3D11Renderer::CreateSamplerState()
+{
+	D3D11_SAMPLER_DESC sampler_desc {};
+	sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sampler_desc.MipLODBias = 0.0f;
+	sampler_desc.MaxAnisotropy = 1;
+	sampler_desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	sampler_desc.BorderColor[0] = 1.0f;
+	sampler_desc.BorderColor[1] = 1.0f;
+	sampler_desc.BorderColor[2] = 1.0f;
+	sampler_desc.BorderColor[3] = 1.0f;
+	sampler_desc.MinLOD = -FLT_MAX;
+	sampler_desc.MaxLOD = FLT_MAX;
+
+	if(FAILED(mpDevice->CreateSamplerState(&sampler_desc, &mpSamplerState)))
 	{
 		return false;
 	}
@@ -760,6 +1146,10 @@ b8 D3D11Renderer::SetupGraphicsPipeline()
 
 	// Pixel Shader (PS)
 	mpImmediateContext->PSSetShader(mpPixelShader.Get(), nullptr, 0);
+	mpImmediateContext->PSSetConstantBuffers(0, 1, mpPSCBLight.GetAddressOf());
+	ID3D11ShaderResourceView * pp_SRVs[]{ mpShaderResourceViews[0].Get(),mpShaderResourceViews[1].Get() };
+	mpImmediateContext->PSSetShaderResources(0, static_cast<u32>(size(pp_SRVs)), pp_SRVs);
+	mpImmediateContext->PSSetSamplers(0, 1, mpSamplerState.GetAddressOf());
 
 	// Output Merger (OM)
 	ID3D11RenderTargetView * pp_RTVs[]{ mpRTV.Get() };

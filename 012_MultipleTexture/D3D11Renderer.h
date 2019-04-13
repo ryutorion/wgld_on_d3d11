@@ -6,6 +6,15 @@
 #include <DirectXMath.h>
 #include <wrl/client.h>
 #include <vector>
+#include <wincodec.h>
+
+struct Vertex
+{
+	DirectX::XMVECTOR position;
+	DirectX::XMVECTOR normal;
+	DirectX::XMVECTOR color;
+	DirectX::XMFLOAT2 uv;
+};
 
 class D3D11Renderer
 {
@@ -52,6 +61,15 @@ private:
 
 	//! ピクセルシェーダの生成
 	b8 CreatePixelShader();
+	//! ピクセルシェーダの定数バッファ生成
+	b8 CreatePSConstantBuffers();
+	//! テクスチャをロード
+	b8 LoadTexture(
+		const wchar_t * path_str,
+		Microsoft::WRL::ComPtr<ID3D11Texture2D1> & p_texture,
+		Microsoft::WRL::ComPtr<ID3D11ShaderResourceView1> & p_shader_resource_view
+	);
+	b8 CreateSamplerState();
 
 	//! レンダーターゲットビューの生成
 	b8 CreateRenderTargetView();
@@ -69,6 +87,8 @@ private:
 	b8 SetupGraphicsPipeline();
 
 private:
+	Microsoft::WRL::ComPtr<IWICImagingFactory2> mpImagingFactory;
+
 	//! クライアント領域の幅
 	s32 mClientWidth = 0;
 	//! クライアント領域の高さ
@@ -91,13 +111,10 @@ private:
 	//! スワップチェインへのポインタ
 	Microsoft::WRL::ComPtr<IDXGISwapChain4> mpSwapChain;
 
-	struct Vertex
-	{
-		DirectX::XMVECTOR position;
-		DirectX::XMVECTOR color;
-	};
 	std::vector<Vertex> mVertices;
 	std::vector<u32> mIndices;
+	u32 mStartIndexLocations[1];
+	u32 mBaseVertexLocations[1];
 
 	//! 頂点バッファへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11Buffer> mpVertexBuffer;
@@ -108,7 +125,7 @@ private:
 	//! インデックスバッファへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11Buffer> mpIndexBuffer;
 	DXGI_FORMAT mIndexFormat = DXGI_FORMAT_R32_UINT;
-	u32 mIndexCount = 0;
+	u32 mIndexCounts[1];
 
 	//! 頂点シェーダのバイナリ
 	Microsoft::WRL::ComPtr<ID3DBlob> mpVertexShaderBlob;
@@ -117,7 +134,16 @@ private:
 	//! 頂点シェーダへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> mpVertexShader;
 
+	struct CBScene
+	{
+		DirectX::XMMATRIX VP;
+	};
 	Microsoft::WRL::ComPtr<ID3D11Buffer> mpVSCBScene;
+
+	struct CBModelVS
+	{
+		DirectX::XMMATRIX W;
+	};
 	Microsoft::WRL::ComPtr<ID3D11Buffer> mpVSCBModels[1];
 
 	//! ラスタライザーステートへのポインタ
@@ -125,6 +151,25 @@ private:
 
 	//! ピクセルシェーダへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11PixelShader> mpPixelShader;
+
+	struct CBLight
+	{
+		DirectX::XMVECTOR light_pos;
+		DirectX::XMVECTOR ambient_color;
+		DirectX::XMVECTOR eye_dir;
+	};
+	//! ピクセルシェーダの定数バッファへのポインタ
+	Microsoft::WRL::ComPtr<ID3D11Buffer> mpPSCBLight;
+
+	struct CBModelPS
+	{
+		DirectX::XMMATRIX IW;
+	};
+	Microsoft::WRL::ComPtr<ID3D11Buffer> mpPSCBModels[1];
+
+	Microsoft::WRL::ComPtr<ID3D11Texture2D1> mpTextures[2];
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView1> mpShaderResourceViews[2];
+	Microsoft::WRL::ComPtr<ID3D11SamplerState> mpSamplerState;
 
 	//! レンダーターゲットビューへのポインタ
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView1> mpRTV;
@@ -137,9 +182,11 @@ private:
 	//! 画面を塗りつぶす色(RGBA)
 	f32 mClearColor[4]{ 0.0f, 0.0f, 0.0f, 1.0f };
 
-	DirectX::XMVECTOR mEye = DirectX::XMVectorSet(0.0f, 0.0f, 20.0f, 1.0f);
+	DirectX::XMVECTOR mEye = DirectX::XMVectorSet(0.0f, 2.0f, 5.0f, 1.0f);
 	DirectX::XMVECTOR mAt = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
 	DirectX::XMVECTOR mUp = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 1.0f);
+
+	DirectX::XMVECTOR mLightPos = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
 };
 
 #endif // D3D11_RENDERER_H_INCLUDED

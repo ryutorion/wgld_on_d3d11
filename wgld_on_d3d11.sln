@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.28307.489
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.28803.156
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "001_RenderingPolygon", "001_RenderingPolygon\001_RenderingPolygon.vcxproj", "{EF2C39A3-DF0E-4F50-B064-8C0011C6CDBA}"
 EndProject
@@ -24,6 +24,8 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "010_PointLight", "010_PointLight\010_PointLight.vcxproj", "{DF72357C-7006-4707-ABC7-74C0D2FD45CC}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "011_TextureMapping", "011_TextureMapping\011_TextureMapping.vcxproj", "{EE3A3731-212F-4031-9805-3509EA79FDD5}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "012_MultipleTexture", "012_MultipleTexture\012_MultipleTexture.vcxproj", "{9A6DBF91-687C-4B56-B914-19BC5B08661E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -121,6 +123,14 @@ Global
 		{EE3A3731-212F-4031-9805-3509EA79FDD5}.Release|x64.Build.0 = Release|x64
 		{EE3A3731-212F-4031-9805-3509EA79FDD5}.Release|x86.ActiveCfg = Release|Win32
 		{EE3A3731-212F-4031-9805-3509EA79FDD5}.Release|x86.Build.0 = Release|Win32
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Debug|x64.ActiveCfg = Debug|x64
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Debug|x64.Build.0 = Debug|x64
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Debug|x86.ActiveCfg = Debug|Win32
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Debug|x86.Build.0 = Debug|Win32
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Release|x64.ActiveCfg = Release|x64
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Release|x64.Build.0 = Release|x64
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Release|x86.ActiveCfg = Release|Win32
+		{9A6DBF91-687C-4B56-B914-19BC5B08661E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
