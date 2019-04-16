@@ -219,13 +219,13 @@ b8 D3D11Renderer::Render()
 	{
 		mpImmediateContext->VSSetConstantBuffers(1, 1, mpVSCBModels[i].GetAddressOf());
 		mpImmediateContext->PSSetConstantBuffers(1, 1, mpPSCBModels[i].GetAddressOf());
+		mpImmediateContext->PSSetSamplers(0, 1, mpSamplerStates[i].GetAddressOf());
+
 		mpImmediateContext->DrawIndexed(
 			mIndexCounts[0],
 			mStartIndexLocations[0],
 			mBaseVertexLocations[0]
 		);
-
-		mpImmediateContext->PSSetSamplers(0, 1, mpSamplerStates[i].GetAddressOf());
 	}
 
 	mpSwapChain->Present(0, 0);
